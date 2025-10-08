@@ -481,5 +481,3 @@ class MultiScaleSpatialEncoder(nn.Module):
         output = self.output_predictor(interacted_features)
         output = output + self.residual_proj(residual)
         return output
-
-
