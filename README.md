@@ -33,18 +33,6 @@ To address this gap, we propose **DMNet**, a **Dual-Stream Multi-Scale Framework
 
 ---
 
-## 📂 Repository Structure
-```
-DMNet/
-├── data/                 # Datasets (PEMS04, PEMS08, etc.)
-├── model/                # Core model components (encoder, mixer, integrator)
-├── scripts/              # Training and evaluation scripts
-├── utils/                # Helper functions (metrics, preprocessing, logging)
-├── configs/              # YAML configs for experiments
-├── results/              # Saved models and logs
-├── requirements.txt      # Dependencies
-└── main.py               # Entry point
-```
 
 ---
 
@@ -77,13 +65,10 @@ We evaluate DMNet on **PEMS04** and **PEMS08** traffic datasets.
 
 ### Training
 ```bash
-python main.py --config configs/pems04.yaml
+python run.py --config configs/pems04.yaml
 ```
 
-### Evaluation
-```bash
-python main.py --config configs/pems04.yaml --evaluate
-```
+
 
 ### 🔑 Key Arguments
 - `--config`: Path to YAML config file.  
