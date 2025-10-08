@@ -1,10 +1,10 @@
 import argparse
 import torch
-
-
-from exp.exp_long_term_forecasting import Exp_Long_Term_Forecast
+from train import Forecast
 import random
 import numpy as np
+import yaml
+import sys
 
 fix_seed = 2021
 random.seed(fix_seed)
@@ -13,16 +13,19 @@ np.random.seed(fix_seed)
 
 parser = argparse.ArgumentParser(description='DMNet')
 
+# Add config file argument
+parser.add_argument('--config', type=str, default=None, help='path to yaml config file')
+
 # basic config
-parser.add_argument('--task_name', type=str, required=True, default='long_term_forecast',
+parser.add_argument('--task_name', type=str, default='forecast',
                     help='task name')
-parser.add_argument('--is_training', type=int, required=True, default=1, help='status')
-parser.add_argument('--model_id', type=str, required=True, default='test', help='model id')
-parser.add_argument('--model', type=str, required=True, default='Autoformer',
+parser.add_argument('--is_training', type=int, default=1, help='status')
+parser.add_argument('--model_id', type=str, default='test', help='model id')
+parser.add_argument('--model', type=str, default='Autoformer',
                     help='model name, options: [Autoformer, Transformer, TimesNet]')
 
 # data loader
-parser.add_argument('--data', type=str, required=True, default='PEMS04', help='dataset type')
+parser.add_argument('--data', type=str, default='PEMS04', help='dataset type')
 parser.add_argument('--root_path', type=str, default='./data/PEMS/', help='root path of the data file')
 parser.add_argument('--data_path', type=str, default='PEMS04.npz', help='data file')
 parser.add_argument('--features', type=str, default='M',
@@ -103,7 +106,52 @@ parser.add_argument('--p_hidden_dims', type=int, nargs='+', default=[128, 128],
                     help='hidden layer dimensions of projector (List)')
 parser.add_argument('--p_hidden_layers', type=int, default=2, help='number of hidden layers in projector')
 
+# Parse command line arguments first
 args = parser.parse_args()
+
+# If config file is provided, load it and update args
+if args.config:
+    try:
+        with open(args.config, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        
+        # Update args with config file values
+        for key, value in config.items():
+            # Remove '--' prefix if present in YAML keys
+            if key.startswith('--'):
+                key = key[2:]
+            # Convert hyphens to underscores (e.g., 'task-name' -> 'task_name')
+            key = key.replace('-', '_')
+            
+            if hasattr(args, key):
+                # Handle special boolean flags (action='store_true' or 'store_false')
+                if key in ['inverse', 'output_attention', 'use_amp', 'use_multi_gpu']:
+                    # For store_true actions, set True if value is truthy
+                    if isinstance(value, bool):
+                        setattr(args, key, value)
+                    elif isinstance(value, (int, str)):
+                        setattr(args, key, bool(int(value)) if str(value).isdigit() else value)
+                elif key == 'distil':
+                    # Special handling for store_false action
+                    setattr(args, key, value)
+                else:
+                    setattr(args, key, value)
+                    
+                print(f'Set {key} = {value} from config file')
+            else:
+                print(f'Warning: Unknown parameter in config file: {key}')
+        
+        print(f'\n✓ Successfully loaded config from {args.config}\n')
+    except FileNotFoundError:
+        print(f'Error: Config file {args.config} not found')
+        sys.exit(1)
+    except yaml.YAMLError as e:
+        print(f'Error parsing YAML file: {e}')
+        sys.exit(1)
+    except Exception as e:
+        print(f'Error loading config: {e}')
+        sys.exit(1)
+
 args.use_gpu = True if torch.cuda.is_available() and args.use_gpu else False
 
 if args.use_gpu and args.use_multi_gpu:
@@ -115,11 +163,9 @@ if args.use_gpu and args.use_multi_gpu:
 print('Args in experiment:')
 print(args)
 
-if args.task_name == 'long_term_forecast':
-    Exp = Exp_Long_Term_Forecast
 
-else:
-    Exp = Exp_Long_Term_Forecast
+Exp = Forecast
+
 
 if args.is_training:
     for ii in range(args.itr):
