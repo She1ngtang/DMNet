@@ -56,8 +56,8 @@ We evaluate DMNet on **PEMS04** and **PEMS08** traffic datasets.
 
 - Download the PEMS04 and PEMS08 datasets.  
 - Place the processed data under:  
-  - `./data/PEMS04/`  
-  - `./data/PEMS08/`  
+  - `./dataset/PEMS/PEMS04.npz`  
+  - `./dataset/PEMS/PEMS08.npz`  
 
 ---
 
