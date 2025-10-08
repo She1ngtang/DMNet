@@ -5,7 +5,7 @@ import numpy as np
 import time
 import math
 
-class DiffPoolMultiScaleExtractor(nn.Module):
+class MetaGraphLearner(nn.Module):
     def __init__(self, hidden_dim, num_nodes, num_scales=3, pool_ratios=[0.25, 0.25]):
         super().__init__()
         self.num_scales = num_scales
@@ -341,7 +341,7 @@ class CrossScaleInteraction(nn.Module):
         return self.norm(output + query)
 
 
-class OutputPredictor(nn.Module):
+class Re_Projection(nn.Module):
     def __init__(self, input_dim, output_dim, dropout):
         super().__init__()
         self.predictor = nn.Sequential(
@@ -394,41 +394,6 @@ class GlobalPositionEncoding(nn.Module):
         return out
 
 
-class MetaGraphLearner(nn.Module):
-    def __init__(self, hidden_dim, num_nodes, num_scales=3, pool_ratios=[0.25, 0.25], input_dim=170, output_dim=128):
-        super(MetaGraphLearner, self).__init__()
-
-        # 初始化GlobalPositionEncoding部分
-        self.global_position_encoding = GlobalPositionEncoding(
-            num_nodes=num_nodes,
-            input_dim=input_dim,
-            hidden_dim=output_dim
-        )
-
-        # 初始化DiffPoolMultiScaleExtractor部分
-        self.diffpool_extractor = DiffPoolMultiScaleExtractor(
-            hidden_dim=hidden_dim,
-            num_nodes=num_nodes,
-            num_scales=num_scales,
-            pool_ratios=pool_ratios
-        )
-
-    def forward(self, x):
-        """
-        输入：
-            x - 输入特征，形状为 (batch_size, num_nodes, seq_len, hidden_dim)
-        输出：
-            out - 经过Meta Graph Learner处理后的输出
-        """
-
-        # 先进行位置编码
-        position_encoded_features = self.global_position_encoding(x)
-
-        # 通过DiffPoolMultiScaleExtractor提取多尺度特征
-        multi_scale_features = self.diffpool_extractor(position_encoded_features)
-
-        # 返回处理后的特征，结合多尺度特征和位置编码
-        return multi_scale_features
 
 
 class MultiScaleSpatialEncoder(nn.Module):
@@ -438,46 +403,53 @@ class MultiScaleSpatialEncoder(nn.Module):
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.num_scales = num_scales
+        self.global_position_encoding = GlobalPositionEncoding(num_nodes, input_dim, hidden_dim)
+        self.metagraphlearner = MetaGraphLearner(
+            hidden_dim=hidden_dim,
+            num_nodes=num_nodes,
+            num_scales=num_scales,
+            pool_ratios=pool_ratios
+        )
 
-        self.meta_graph_learner = MetaGraphLearner(hidden_dim, num_nodes, num_scales, pool_ratios, input_dim, hidden_dim)
 
-        self.spectral_gcn_modules = nn.ModuleList()
-        self.spatial_mamba_modules = nn.ModuleList()
+
         self.gmamba_modules = nn.ModuleList()
 
         for i in range(num_scales):
-            scale_nodes = self.multi_scale_extractor.scale_nodes[i]
+            scale_nodes = self.metagraphlearner.scale_nodes[i]
             self.gmamba_modules.append(
                 Gmamba(hidden_dim, hidden_dim, scale_nodes)
             )
 
         self.cross_scale_interaction = CrossScaleInteraction(hidden_dim)
-        self.output_predictor = OutputPredictor(hidden_dim, input_dim, dropout)
+        self.re_projection = Re_Projection(hidden_dim, input_dim, dropout)
         self.residual_proj = nn.Linear(input_dim, input_dim)
 
     def forward(self, x):
         batch_size, num_nodes, seq_len = x.shape
         residual = x
-        multi_scale_data = self.meta_graph_learner(x)
+        x_encoded = self.global_position_encoding(x)
+        multi_scale_data = self.metagraphlearner(x_encoded)
+
         processed_features = []
-        original_adj = self.multi_scale_extractor.build_adjacency_matrix(num_nodes, x.device)
+        original_adj = self.metagraphlearner.build_adjacency_matrix(num_nodes, x.device)
 
         for i in range(self.num_scales):
             scale_features, scale_adj = multi_scale_data[i]
-            scale_nodes = self.multi_scale_extractor.scale_nodes[i]
+            scale_nodes = self.metagraphlearner.scale_nodes[i]
             scale_feature_4d = scale_features.view(batch_size, scale_nodes, seq_len, self.hidden_dim)
-            gmamba_output = self.spatial_mamba_modules[i](scale_feature_4d)
+            gmamba_output = self.gmamba_modules[i](scale_feature_4d)
             fused_output = gmamba_output.contiguous()
 
             if i == 0:
                 processed_features.append(fused_output)
             else:
                 fused_output_reshaped = fused_output.view(batch_size * seq_len, scale_nodes, self.hidden_dim)
-                upsampled_output = self.multi_scale_extractor.upsample_layers[i - 1](fused_output_reshaped,
-                                                                                     original_adj)
+                upsampled_output = self.metagraphlearner.upsample_layers[i - 1](fused_output_reshaped,
+                                                                                original_adj)
                 upsampled_output_4d = upsampled_output.view(batch_size, num_nodes, seq_len, self.hidden_dim)
                 processed_features.append(upsampled_output_4d)
         interacted_features = self.cross_scale_interaction(processed_features[0], processed_features[1], processed_features[2])
-        output = self.output_predictor(interacted_features)
+        output = self.re_projection(interacted_features)
         output = output + self.residual_proj(residual)
         return output
