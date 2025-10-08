@@ -17,8 +17,6 @@ import torch.nn.functional as F
 class Temporal_Disentanglement(nn.Module):
     def __init__(self, configs):
         super(Temporal_Disentanglement, self).__init__()
-
-        # Wavelet Transform: 用于提取信号的突变性（边缘特征、快速变化等）
         self.wavelet_transform = nn.Conv1d(
             in_channels=configs.d_model,
             out_channels=configs.d_model,
@@ -273,6 +271,41 @@ class Model(nn.Module):
             ]
         )
 
+        self.predict_layers = torch.nn.ModuleList(
+            [
+                torch.nn.Linear(
+                    configs.seq_len // (configs.down_sampling_window ** i),
+                    configs.pred_len,
+                )
+                for i in range(configs.down_sampling_layers + 1)
+            ]
+        )
+
+        if self.channel_independence:
+            self.projection_layer = nn.Linear(
+                configs.d_model, 1, bias=True)
+        else:
+            self.projection_layer = nn.Linear(
+                configs.d_model, configs.c_out, bias=True)
+
+            self.out_res_layers = torch.nn.ModuleList([
+                torch.nn.Linear(
+                    configs.seq_len // (configs.down_sampling_window ** i),
+                    configs.seq_len // (configs.down_sampling_window ** i),
+                )
+                for i in range(configs.down_sampling_layers + 1)
+            ])
+
+            self.regression_layers = torch.nn.ModuleList(
+                [
+                    torch.nn.Linear(
+                        configs.seq_len // (configs.down_sampling_window ** i),
+                        configs.pred_len,
+                    )
+                    for i in range(configs.down_sampling_layers + 1)
+                ]
+            )
+
 
     def out_projection(self, dec_out, i, out_res):
         dec_out = self.projection_layer(dec_out)
@@ -381,9 +414,15 @@ class Model(nn.Module):
 
         # embedding
         enc_out_list = []
-        for x in x_list:
-            enc_out = self.enc_embedding(x, None)  # [B,T,C]
-            enc_out_list.append(enc_out)
+        x_list = self.pre_enc(x_list)
+        if x_mark_enc is not None:
+            for i, x, x_mark in zip(range(len(x_list[0])), x_list[0], x_mark_list):
+                enc_out = self.enc_embedding(x, x_mark)  # [B,T,C]
+                enc_out_list.append(enc_out)
+        else:
+            for i, x in zip(range(len(x_list[0])), x_list[0]):
+                enc_out = self.enc_embedding(x, None)  # [B,T,C]
+                enc_out_list.append(enc_out)
 
         # Past Decomposable Mixing as encoder for past
         for i in range(self.layer):
@@ -398,6 +437,7 @@ class Model(nn.Module):
 
     def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec, mask=None):
         T = self.temporal_mixer(x_enc, x_mark_enc)
-        S = self.spatial_encoder(x_enc)
-        dec_out = self.spatio_temporal_integrator(T, S)
+        S = self.spatial_encoder(x_enc.permute(0,2,1))
+        dec_out = self.spatio_temporal_integrator(T.permute(0,2,1), S).permute(0,2,1)
         return dec_out
+
