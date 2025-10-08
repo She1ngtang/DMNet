@@ -72,7 +72,6 @@ python run.py --config configs/pems04.yaml
 
 ### 🔑 Key Arguments
 - `--config`: Path to YAML config file.  
-- `--evaluate`: Run evaluation only.  
 - `--save_dir`: Directory to save checkpoints and logs.  
 
 ---
